@@ -1,0 +1,9 @@
+[submodule "cv_final/cvlib/thirdparty/glfw"]
+	path = cv_final/cvlib/thirdparty/glfw
+	url = https://github.com/glfw/glfw
+[submodule "cv_final/cvlib/thirdparty/stb"]
+	path = cv_final/cvlib/thirdparty/stb
+	url = https://github.com/nothings/stb
+[submodule "cv_final/cvlib/thirdparty/glm"]
+	path = cv_final/cvlib/thirdparty/glm
+	url = https://github.com/g-truc/glm

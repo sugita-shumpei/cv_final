@@ -1,0 +1,4 @@
+#ifndef CV_FINAL_CONFIG_H_IN
+#define CV_FINAL_CONFIG_H_IN
+#cmakedefine CV_FINAL_DATA_DIR "@CV_FINAL_DATA_DIR@"
+#endif

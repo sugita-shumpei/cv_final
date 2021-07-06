@@ -1,0 +1,6 @@
+add_subdirectory(thirdparty)
+set(CV_FINAL_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../Data")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/Config.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/Config.h)
+add_library(cvlib ${CMAKE_CURRENT_SOURCE_DIR}/src/Camera.cpp)
+target_include_directories(cvlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/include)
+target_link_libraries(cvlib glm glad stb glfw)

@@ -1,0 +1,10 @@
+{
+    "python.pythonPath": "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\Python37_64\\python.exe",
+    "files.associations": {
+        "xstring": "cpp",
+        "string_view": "cpp",
+        "array": "cpp",
+        "vector": "cpp",
+        "xutility": "cpp"
+    }
+}
