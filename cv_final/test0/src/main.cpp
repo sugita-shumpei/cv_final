@@ -34,7 +34,7 @@ public:
     int Run(){
         this->initContext();
         this->loadProgram();
-        this->loadLightMap(std::filesystem::path(CV_FINAL_DATA_DIR"/chess/rectified"));
+        this->loadLightMap(std::filesystem::path(CV_FINAL_DATA_DIR"/taroto/rectified"));
         this->initCamera();
         this->initScreen();
         this->mainLoop();
@@ -58,6 +58,7 @@ private:
         glfwMakeContextCurrent(m_Window);
         glfwSetWindowUserPointer(m_Window, this);
         glfwSetCursorPosCallback(m_Window, cursorPosCallback);
+        glfwSetScrollCallback(   m_Window,    scrollCallback);
         if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
             throw std::runtime_error("Failed To Initialize GLAD!");
         }
@@ -128,7 +129,7 @@ private:
             imageSCount = std::max(imageSCount, x + 1);
             imageTCount = std::max(imageTCount, y + 1);
         }
-        m_LightMapHeader.width = imageWidth;
+        m_LightMapHeader.width  = imageWidth;
         m_LightMapHeader.height = imageHeight;
         m_LightMapHeader.sCount = imageSCount;
         m_LightMapHeader.tCount = imageTCount;
@@ -195,18 +196,23 @@ private:
     void    mainLoop() {
         glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         this->initState();
+        GLint timeLoc        = glGetUniformLocation(m_Program, "time");
+        GLint focalLoc       = glGetUniformLocation(m_Program, "focal");
         GLint resolutionLoc  = glGetUniformLocation(m_Program, "resolution");
         glm::vec2 resolution = glm::vec2(1.0f / m_Width, 1.0f / m_Height);
+        cvlib::Camera camera = {};
+        float focal          = 0.0f;
         while (!glfwWindowShouldClose(m_Window)) {
             glfwPollEvents();
             if (m_CameraUpdate) {
-                cvlib::Camera camera  = m_CameraController.GetCamera(m_CameraFovY, static_cast<float>(m_Width) / static_cast<float>(m_Height));
+                camera         = m_CameraController.GetCamera(m_CameraFovY, static_cast<float>(m_Width) / static_cast<float>(m_Height));
                 auto [u, v, w] = camera.getUVW();
                 CameraData cameraData = {};
                 cameraData.eye = camera.getEye();
                 cameraData.u = u;
                 cameraData.v = v;
                 cameraData.w = w;
+
                 glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_CameraSSBO);
                 glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(CameraData), &cameraData);
                 glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
@@ -216,11 +222,16 @@ private:
             glViewport(0, 0, m_Width, m_Height);
             glUseProgram(m_Program);
             glBindVertexArray(m_ScreenVAO);
+            float focal = 0.05f * m_CurrentScrollPos.y;
+            glUniform1f(timeLoc , m_CurrentTime);
+            glUniform1f(focalLoc, focal);
             glUniform2f(resolutionLoc, resolution.x, resolution.y);
+           
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_LightMapSSBO);
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_CameraSSBO);
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
             glfwSwapBuffers(m_Window);
+            std::cout << "\reye: " << camera.getEye().z << " focal: " << focal << std::flush;
             this->updateState();
         }
     }
@@ -289,6 +300,14 @@ private:
             app->m_CurrentCursorPos = newCursorPos;
         }
     }
+    static void scrollCallback(GLFWwindow* window, double xPos, double yPos) {
+        Application* app = nullptr;
+        if (app = static_cast<Application*>(glfwGetWindowUserPointer(window))) {
+            glm::vec2 newScrollPos  = glm::vec2(xPos, yPos);
+            app->m_DeltaScrollPos   = newScrollPos;
+            app->m_CurrentScrollPos+= newScrollPos;
+        }
+    }
 private:
     GLFWwindow*             m_Window           = nullptr;
     int                     m_Width            = 640;
@@ -308,6 +327,8 @@ private:
     float                   m_DeltaTime        = 0.0f;
     glm::vec2               m_CurrentCursorPos = {};
     glm::vec2               m_DeltaCursorPos   = {};
+    glm::vec2	            m_CurrentScrollPos = { 0.0,0.0 };
+    glm::vec2	            m_DeltaScrollPos   = { 0.0,0.0 };
 private:
     static inline constexpr std::string_view vsSource =
         "#version 450 core\n"
@@ -341,6 +362,7 @@ private:
         "} camera;\n"
         "uniform float time;\n"
         "uniform vec2  resolution;\n"
+        "uniform float focal;\n"
         "in vec2 fTexCoord;\n"
         "layout(location=0) out vec4 fragColor;\n"
         "bool IsValidTexCoord(vec2 uv){\n"
@@ -350,54 +372,76 @@ private:
         "   return fract(sin(dot(st.xy,vec2(12.9898, 78.233))) *43758.5453123);\n"
         "}\n"
         "vec3 mainCalc1(vec2 texCoord){\n"
-        "   vec3  dir     = normalize(camera.u * (texCoord.x-0.5f) + camera.v * (texCoord.y-0.5f) + camera.w);\n"
+        "   vec3  dir     = normalize(camera.u * (texCoord.x-0.5f) + camera.v * (texCoord.y-0.5f) - camera.w);\n"
         "   float stLen   = (0.0f-camera.eye.z)/dir.z;\n"
         "   vec2  st      = camera.eye.xy + dir.xy*stLen + vec2(0.5f);\n"
-        "   float uvLen   = (1.0f-camera.eye.z)/dir.z;\n"
-        "   vec2  uv      = (camera.eye.xy + dir.xy*uvLen)/2.0f + vec2(0.5f);\n"
-        "   if(!IsValidTexCoord(uv)||!IsValidTexCoord(st)){\n"
-        "       return vec3(0.0f,0.0f,0.0f);\n"
-        "   }\n"
-        "   else{\n"
-        "       vec3 color = vec3(0.0f,0.0f,0.0f);\n"
-        "       float s    = lightMap.sCount*st.x;\n"
-        "       float t    = lightMap.tCount*st.y;\n"
-        "       float u    = lightMap.width *uv.x;\n"
-        "       float v    = lightMap.height*uv.y;\n"
-        "       if(float(int(s))>=lightMap.sCount-2){return vec3(1.0,0.0,0.0);}\n"
-        "       if(float(int(t))>=lightMap.tCount-2){return vec3(1.0,0.0,0.0);}\n"
-        "       for(int dv = 0;dv<2;++dv){\n"
-        "           float wv = abs(float(int(v+dv))-v);\n"
-        "           for(int du = 0;du<2;++du){\n"
-        "               float wu = abs(float(int(u+du))-u);\n"
-        "               for(int dt = 0;dt<2;++dt){\n"
-        "                   float wt = t<lightMap.tCount-2?abs(float(int(t+dt))-t):0.5f;\n"
-        "                   for(int ds = 0;ds<2;++ds){\n"
-        "                       float ws = s<lightMap.sCount-2?abs(float(int(s+ds))-s):0.5f;\n"
-        "                       float w  = ws*wt*wu*wv;\n"
-        "                       color += vec3(ReadLightMap(clamp(int(s+ds),0,lightMap.sCount-1),clamp(int(t+dt),0,lightMap.tCount-1),clamp(int(u+du),0,lightMap.width-1),clamp(int(v+dv),0,lightMap.height-1)))* w;\n"
-        "                   }\n"
-        "               }\n"
-        "           }\n"
-        "       }\n"
-        "       return color;\n"  
-        "   }\n"
-        "}\n"
-        "vec3 mainCalc2(vec2 texCoord){\n"
-        "   vec3  dir     = normalize(camera.u * (texCoord.x-0.5f) + camera.v * (texCoord.y-0.5f) + camera.w);\n"
-        "   float stLen   = (0.0f-camera.eye.z)/dir.z;\n"
-        "   vec2  st      = camera.eye.xy + dir.xy*stLen + vec2(0.5f);\n"
-        "   float uvLen   = (1.0f-camera.eye.z)/dir.z;\n"
+        "   float uvLen   = (focal-camera.eye.z)/dir.z;\n"
         "   vec2  uv      = camera.eye.xy + dir.xy*uvLen + vec2(0.5f);\n"
         "   if(!IsValidTexCoord(uv)||!IsValidTexCoord(st)){\n"
         "       return vec3(0.0f,0.0f,0.0f);\n"
         "   }\n"
         "   else{\n"
-        "       int s      = int(lightMap.sCount*st.x);\n"
-        "       int t      = int(lightMap.tCount*st.y);\n"
-        "       int u      = int(lightMap.width *uv.x);\n"
-        "       int v      = int(lightMap.height*uv.y);\n"
+        "       int s      = int(float(lightMap.sCount)*st.x);\n"
+        "       int t      = int(float(lightMap.tCount)*st.y);\n"
+        "       int u      = int(float(lightMap.width )*uv.x);\n"
+        "       int v      = int(float(lightMap.height)*uv.y);\n"
         "       vec3 color = vec3(ReadLightMap(s,t,u,v));\n"
+        "       return color;\n"
+        "   }\n"
+        "}\n"
+        "vec3 mainCalc2(vec2 texCoord){\n"
+        "   vec3  dir     = normalize(camera.u * (texCoord.x-0.5f) + camera.v * (texCoord.y-0.5f) - camera.w);\n"
+        "   float stLen   = (0.0f-camera.eye.z)/dir.z;\n"
+        "   vec2  st      = camera.eye.xy + dir.xy*stLen + vec2(0.5f);\n"
+        "   float uvLen   = (focal-camera.eye.z)/dir.z;\n"
+        "   vec2  uv      = camera.eye.xy + dir.xy*uvLen + vec2(0.5f);\n"
+        "   if(!IsValidTexCoord(uv)||!IsValidTexCoord(st)){\n"
+        "       return vec3(0.0f,0.0f,0.0f);\n"
+        "   }\n"
+        "   else{\n"
+        "       float rs = float(lightMap.sCount)*st.x;\n"
+        "       float rt = float(lightMap.tCount)*st.y;\n"
+        "       float ru = float(lightMap.width )*uv.x;\n"
+        "       float rv = float(lightMap.height)*uv.y;\n"
+        "       int   is = int(rs);\n"
+        "       int   it = int(rt);\n"
+        "       int   iu = int(ru);\n"
+        "       int   iv = int(rv);\n"
+        "       if(is>lightMap.sCount-2 || it>lightMap.tCount-2||iu>lightMap.width-2||iv>lightMap.height-2){\n"
+        "           return vec3(0.0f,0.0f,0.0f);\n"
+        "       }\n"
+        //"       if(rs-float(is)<0.01f||rs-float(is)>0.91f||rt-float(it)<0.01f||rt-float(it)>0.91f){ return vec3(1.0f,0.0f,0.0f);}\n"
+        "       vec3 color =  vec3(0);\n"
+        "       float w    = 0.0f;\n"
+        "       for(int dt=0;dt<2;++dt){\n"
+        "           for(int ds=0;ds<2;++ds){\n"
+        "               for(int dv=0;dv<2;++dv){\n"
+        "                   for(int du=0;du<2;++du){\n"
+        "                       float tw = abs(float(is+ds)-rs)*abs(float(it+dt)-rt)*abs(float(iu+du)-ru)*abs(float(iv+dv)-rv);\n"
+        "                       color += ReadLightMap(is+ds,it+dt,iu+du,iv+dv)*tw;\n"
+        "                       w     += tw;\n"
+        "                   }\n"
+        "               }\n"
+        "           }\n"
+        "       }\n"
+        "       return color/w;\n"
+        "   }\n"
+        "}\n"
+        "vec3 mainCalc3(vec2 texCoord){\n"
+        "   vec3  dir     = normalize(camera.u * (texCoord.x-0.5f) + camera.v * (texCoord.y-0.5f) - camera.w);\n"
+        "   float stLen   = (0.0f-camera.eye.z)/dir.z;\n"
+        "   vec2  st      = camera.eye.xy + dir.xy*stLen + vec2(0.5f);\n"
+        "   float uvLen   = (focal-camera.eye.z)/dir.z;\n"
+        "   vec2  uv      = camera.eye.xy + dir.xy*uvLen + vec2(0.5f);\n"
+        "   if(!IsValidTexCoord(uv)||!IsValidTexCoord(st)){\n"
+        "       return vec3(0.0f,0.0f,0.0f);\n"
+        "   }\n"
+        "   else{\n"
+        "       int s      = int(float(lightMap.sCount)*st.x);\n"
+        "       int t      = int(float(lightMap.tCount)*st.y);\n"
+        "       int u      = int(float(lightMap.width )*uv.x);\n"
+        "       int v      = int(float(lightMap.height)*uv.y);\n"
+        "       vec3 color = vec3(float(s)/float(lightMap.sCount),float(t)/float(lightMap.tCount),0.0f);\n"
         "       return color;\n"
         "   }\n"
         "}\n"
@@ -405,10 +449,10 @@ private:
         "   fragColor = vec4(mainCalc2(fTexCoord),1.0f);\n"
         "}\n";
     static inline constexpr Vertex   vertices[] = {
-        {{-1.0,-1.0,0.0},{0.0f,1.0f}},
-        {{ 1.0,-1.0,0.0},{1.0f,1.0f}},
-        {{ 1.0, 1.0,0.0},{1.0f,0.0f}},
-        {{-1.0, 1.0,0.0},{0.0f,0.0f}}
+        {{-1.0,-1.0,0.0},{1.0f,0.0f}},
+        {{ 1.0,-1.0,0.0},{0.0f,0.0f}},
+        {{ 1.0, 1.0,0.0},{0.0f,1.0f}},
+        {{-1.0, 1.0,0.0},{1.0f,1.0f}}
     };
     static inline constexpr uint32_t indices[] = {
         0,1,2,
